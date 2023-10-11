@@ -1,0 +1,142 @@
+	.TITLE	PRTVAL
+	.IDENT	/X1.10/
+.REM %
+Set of subroutines for printing values (octal, decimal,
+hexidecimal and binary formats)
+%
+	.GLOBL	PRTOCT, PRBOCT, PRTDES, PRTDEU
+	.GLOBL	PRTHEX, PRBHEX
+	.GLOBL	PRTBIN, PRBBIN
+	.MCALL	.TTYOUT
+;-----------------------------------------------------------
+; Print an octal value without trailing Cr-Lf (part of TSX6.4 source).
+; PRTOCT - print the word
+; PRBOCT - print the vyte
+;
+; Inputs:
+;	R0 = value to be printed.
+;
+PRTOCT: MOV	R1, -(SP)
+	MOV	R2, -(SP)
+	MOV	#6, R2		; Print 6 gigits
+	MOV	R0, R1		; Get value to print
+	CLR	R0		; Initialize for shift
+	ASHC	#1, R0		; Get first octal digit ...
+	BR	 PRTO2$		; ... and continue
+PRBOCT: MOV	R1, -(SP)
+	MOV	R2, -(SP)
+	MOV	#3,R2		; Print 3 digits
+	SWAB	R0		; Put value to high byte
+	MOV	R0, R1		; Get value to print
+	CLR	R0		; Initialize for shift
+	ASHC	#2, R0		; Get 1st octal digits ...
+	BR	PRTO2$		; ... and continue
+;
+PRTO1$: CLR	R0		; Initialize for shift
+	ASHC	#3, R0		; Shift an octal digit into R0
+PRTO2$:	ADD	#'0, R0		; Convert to ascii character
+	.TTYOUT			; Print the character
+	SOB	R2, PRTO1$	; Loop
+	MOV	(SP)+, R2
+	MOV	(SP)+, R1
+	RETURN
+;
+;-----------------------------------------------------------
+; Print a decimal value with leading zeros suppressed
+; and with no trailing Cr-Lf (part of TSX6.4).
+; PRTDES - print the signed value.
+; PRTDEU - print the unsigned value.
+;
+; Inputs:
+;	  R0 = Value to be printed
+;
+PRTDES: MOV	R1, -(SP)
+	MOV	R0, R1		; GET VALUES TO BE CONVERTED
+	TST	R1		; IS NEGATIVE?
+	BPL	PRTD$		; NO - CONTINUE
+	NEG	R1		; MAKE POSITIVE
+	MOV	#'-, R0		; MINUS SIGN TO R0 ...
+	.TTYOUT			; ... AND PRINT IT
+	BR	PRTD$		; GO TO PRINT THE VALUE
+;
+PRTDEU:	MOV	R1, -(SP)
+	MOV	R0, R1		; GET VALUE TO BE CONVERTED
+PRTD$:	CLR	-(SP)		; NULL ON STACK TO STOP US
+;
+;Convert value to ascii digit string and stack the digits.
+;
+1$:	CLR	R0		; SET HIGHORDER PART OF VALUE TO 0
+	DIV	#10., R0	; DIVIDE R0Rl BY 10.
+	ADD	#'0, R1		; CONVERT REMAINDER TO ASCII DIGIT
+	MOV	R1, -(SP)	; AND STACK THE DIGIT
+	MOV	R0, R1		; GET QUOTIENT
+	BNE	1$		; BR IF MORE DIGITS TO CONVERT
+;
+; Finished conversion. Print result,
+;
+2$:	MOV	(SP)+, R0	; GET A DIGIT FROM THE STACK
+	BEQ	3$		; BR IF REACHED END
+	.TTYOUT			; PRINT THE DIGIT
+	BR	2$		; PRINT MORE
+
+;
+; Finished
+;
+3$:	MOV	(SP)+, R1
+	RETURN
+;
+;-----------------------------------------------------------
+; Print a hexidecimal value without trailing Cr-Lf
+; PRTHEX - print the word
+; PRBHEX - print the byte
+;
+; Inputs:
+;	  R0 = value to be printed.
+;
+PRTHEX:	MOV	R2, -(SP)
+	MOV	#4, R2		; Loop count for word
+	BR	PRTH$
+PRBHEX:	MOV	R2, -(SP)
+	MOV	#2, R2		; Loop count for byte
+	SWAB	R0
+PRTH$:	MOV	R1, -(SP)
+	MOV	R0, R1		; Get value to print
+1$:	CLR	R0		; Prepare printing reg
+	ASHC	#4, R0	 	; Get 4 bits
+	CMP	#10., R0	; Digits?
+	BLE	2$		; No - br to letter
+	ADD	#48., R0	; Yes - make printable digits ...
+	BR	3$		; ... and print
+2$:	ADD	#55., R0	; Make printable letter
+3$:	.TTYOUT			; Print result
+	SOB	R2, 1$		; Loop
+	MOV	(SP)+, R1	; Restore regs.
+	MOV	(SP)+, R2
+	RETURN
+;
+;-----------------------------------------------------------
+; Print a binary value without trailing Cr-Lf
+; PRTBIN - print the word
+; PRBBIN - print the byte
+;
+; Inputs:
+;	R0 = value to be printed.
+;
+PRTBIN:	MOV	R2, -(SP)
+	MOV	#16., R2	; Loop count for word
+	BR	PRTB$
+PRBBIN:	MOV	R2, -(SP)
+	MOV	#8., R2		; Loop count for byte
+	SWAB	R0
+PRTB$:	MOV	R1, -(SP)
+	MOV	R0, R1		; Get value to print
+1$:	CLR	R0		; Prepare printing reg
+	ASHC	#1, R0		; Get 1 bit
+	ADD	#'0, R0		; Make printable digit
+	.TTYOUT			; Print result
+	SOB	R2, 1$		; Loop
+	MOV	(SP)+, R1	; Restore regs.
+	MOV	(SP)+, R2
+	RETURN
+;
+	.END

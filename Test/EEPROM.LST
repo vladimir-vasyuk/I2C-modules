@@ -1,0 +1,922 @@
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07
+Table of contents
+
+    2-   5      Definition section
+    4-   1      Operations section
+    9-   1      Address registers section
+   12-   1      Change section
+   14-   1      Interrupt section
+   17-   1      Wait section
+   20-   1      Print info section
+   23-   1      Misc. subroutines
+   24-   1      Executation table
+   25-   1      Data section
+   26-   1      Text section
+EEPROM -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 1
+
+
+      1                                         .TITLE  EEPROM -- EEPROM I2C module test
+      2                                         .IDENT  /X1.10/
+      3                                 .REM %
+      4                                 Test functions of the EEPROM nodule.
+      5
+      6                                 To link use command: LINK EEPROM,PRTVAL,INP
+      7                                 To exit just press <Enter> when promted (Choice)
+      8                                 %
+      9                                         .MCALL  .PRINT, .EXIT, .TTYOUT, .TTYIN, .TTYINR
+     10                                         .INCLUDE /EEPROM.INC/
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 2
+
+
+      1                                         .TITLE  EPRMHD -- EEPROM I2C module test
+      2                                         .IDENT  /X1.02/
+      3                                         .ENABLE LC
+      4                                 ;
+      5                                         .SBTTL  Definition section
+      6                                 ;
+      7         175300                          CSR     = 175300        ; CSR
+      8         175302                          DATARW  = CSR+2         ; Data-Register
+      9         175304                          RDADDR  = CSR+4         ; Read-Address-Register
+     10         175306                          WRADDR  = CSR+6         ; Write-Address-Register
+     11         175310                          ERREG   = CSR+10        ; Error-Register
+     12         175312                          IRDREG  = CSR+12        ; I2C-HOST address regs.
+     13         175314                          IWRREG  = CSR+14        ; HOST-I2C address regs.
+     14                                 ;
+     15         000001                          M.RST   = 01            ; Software reset
+     16         000003                          M.WRT   = 03            ; Write operation
+     17         000005                          M.RDR   = 05            ; Read operation
+     18                                 ;
+     19         000100                          IEB     = 100           ; Interrupt enable
+     20         000200                          RDYB    = 200           ; Ready
+     21         020000                          TIB     = 20000         ; Transmit interrupt request
+     22         040000                          RIB     = 40000         ; Receive interrupt request
+     23         100000                          ERRB    = 100000        ; Error
+     24                                 ;
+     25         000310                          MODVEC  = 310           ; Interrupt vector
+     26         000340                          PRI07   = 340           ; IPL = 7
+     27                                 ;
+     28         000001                          IEF     = 1             ; Interrupt information bit
+     29         000004                          RXF     = 4             ; Receive information bit
+     30         000002                          TXF     = 2             ; Transmit information bit
+     31         000010                          ERF     = 10            ; Error information bit
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 3
+Definition section
+
+      1                                 ;
+      2         000044                  JSW     = 44                    ; Job status word
+      3         010000                  TTSPC$  = 10000                 ; Special terminal mode
+      4                                 ;
+      5 000000                                  .PSECT
+      6                                 ;
+      7 000000  004767  001316          START:: CALL    PRTINF
+      8 000004                          1$:     .PRINT  #PROMPT         ; Print info header
+      9 000012  012701  000006'                 MOV     #BUFF, R1
+     10 000016                          2$:     .TTYIN                  ; Get a character from keyboard
+     11 000022  120027  000012                  CMPB    R0, #12         ; Is the character LF
+     12 000026  001402                          BEQ     3$              ; Yes - break
+     13 000030  110021                          MOVB    R0, (R1)+       ; No - put the character to buffer
+     14 000032  000771                          BR      2$              ; Loop
+     15 000034  105767  000006'         3$:     TSTB    BUFF            ; Nothing entered?
+     16 000040  001413                          BEQ     20$             ; Branch if nothing entered
+     17 000042  116701  000006'                 MOVB    BUFF, R1        ; Get first byte
+     18 000046  162701  000060                  SUB     #60, R1         ; Convert to digit
+     19 000052  120127  000010                  CMPB    R1, #8.         ; More than limit?
+     20 000056  101004                          BHI     20$             ; Yes - exit
+     21 000060  006301                          ASL     R1              ; Mult by 2
+     22 000062  004771  001732'                 CALL    @ADREXE(R1)     ; Jump to execution
+     23 000066  000746                          BR      1$              ; Go back for more
+     24 000070                          20$:    .EXIT                   ; Exit program on null input
+     25
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 4
+Operations section
+
+      1                                         .SBTTL  Operations section
+      2                                 ;------------------------------------------------------------------
+      3                                 ; Reset operation
+      4                                 ;
+      5 000072                          RESET::
+      6 000072                                  .PRINT  #RESMSG
+      7 000100  012737  000001  175300          MOV     #M.RST, @#CSR   ; Call reset function
+      8 000106  132737  000200  175300  1$:     BITB    #RDYB, @#CSR    ; Wait for ready ...
+      9 000114  001774                          BEQ     1$              ; ... bit
+     10 000116  004767  001314                  CALL    PRTCSR          ; Print CSR value
+     11                                 ;       .PRINT  #EOL
+     12 000122  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 5
+Operations section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Write data to buffer
+      3                                 ;
+      4 000124                          WRTDAT::
+      5 000124                                  .PRINT  #WRTMSG
+      6 000132  016705  000002'                 MOV     COUNT, R5       ; Loop counter
+      7 000136  001412                          BEQ     2$              ; If '0' - write operation
+      8 000140  016737  000004' 175302  1$:     MOV     WRTVAL, @#DATARW ; Write data to buffer
+      9 000146  032737  100000  175300          BIT     #ERRB, @#CSR    ; Check error bit
+     10 000154  001010                          BNE     3$              ; If error - break the loop.
+     11 000156  105267  000004'                 INCB    WRTVAL          ; Else - inc. value ...
+     12 000162  077512                          SOB     R5, 1$          ; ... and loop
+     13 000164  004767  001474          2$:     CALL    PAUSE
+     14 000170  004767  000114                  CALL    WRTOP           ; Write operation
+     15 000174  000207                          RETURN
+     16 000176  004767  001120          3$:     CALL    PRTINF
+     17 000202  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 6
+Operations section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Read data from buffer
+      3                                 ;
+      4 000204                          RDRDAT::
+      5 000204  004767  000176                  CALL    RDROP           ; Read operation
+      6 000210  032767  000010  000000'         BIT     #ERF, FLAGS     ; Error?
+      7 000216  001401                          BEQ     1$              ; No - continue
+      8 000220  000207                          RETURN                  ; Yes - return
+      9 000222  004767  001436          1$:     CALL    PAUSE
+     10 000226                                  .PRINT  #RDRMSG
+     11 000234  016705  000002'                 MOV     COUNT, R5       ; Loop counter
+     12 000240  113700  175302          2$:     MOVB    @#DATARW, R0    ; Read data from buffer
+     13 000244  032737  100000  175300          BIT     #ERRB, @#CSR    ; Check error bit
+     14 000252  001011                          BNE     3$              ; If error - break the loop.
+     15 000254  042700  177400                  BIC     #177400, R0     ; Clear high byte (for ...
+     16                                                                 ; ... correct output only)
+     17 000260  004767  000000G                 CALL    PRTDEU          ; Print data value, ...
+     18 000264  012700  000040                  MOV     #' ,R0          ; ... print ...
+     19 000270                                  .TTYOUT                 ; ... space, ...
+     20 000274  077517                          SOB     R5, 2$          ; and loop
+     21 000276  005000                  3$:     CLR     R0              ; Print ...
+     22 000300                                  .PRINT                  ; ... <LF><CR>
+     23 000302  004767  001014                  CALL    PRTINF
+     24 000306  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 7
+Operations section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Write operation
+      3                                 ;
+      4 000310                          WRTOP::
+      5 000310  010146                          MOV     R1, -(SP)
+      6 000312                                  .PRINT  #WOPMSG
+      7 000320  013701  175300                  MOV     @#CSR, R1       ; Get CSR value
+      8 000324  042701  000007                  BIC     #7, R1          ; Clear operation bits
+      9 000330  052701  000003                  BIS     #M.WRT, R1      ; Set correct bits and start the ...
+     10 000334  010137  175300                  MOV     R1, @#CSR       ; ... operation by writting to CSR
+     11                                 ;
+     12 000340  032767  000001  000000'         BIT     #IEF, FLAGS     ; Interrupt mode?
+     13 000346  001403                          BEQ     1$              ; No - poll CSR
+     14 000350  004767  000726                  CALL    WTINT           ; Yes - wait for interrupt flag
+     15 000354  000410                          BR      2$
+     16 000356  004767  000640          1$:     CALL    WRDY            ; Poll the CSR to detect completion
+     17                                 ;
+     18                                 ; Reset TIB to 0 by writing 1 to it
+     19 000362  013701  175300                  MOV     @#CSR, R1       ; Get CSR value
+     20 000366  042701  140000                  BIC     #ERRB!RIB, R1   ; Protect RIB and ERRB
+     21 000372  010137  175300                  MOV     R1, @#CSR       ; Reset TIB
+     22                                 ;
+     23 000376  004767  000720          2$:     CALL    PRTINF
+     24 000402  012601                          MOV     (SP)+, R1
+     25 000404  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 8
+Operations section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Read operation
+      3                                 ;
+      4 000406                          RDROP::
+      5 000406  010146                          MOV     R1, -(SP)
+      6 000410                                  .PRINT  #ROPMSG
+      7 000416  013701  175300                  MOV     @#CSR, R1       ; Get CSR value
+      8 000422  042701  000007                  BIC     #7, R1          ; Clear operation bits
+      9 000426  052701  000005                  BIS     #M.RDR, R1      ; Set correct bits and start the ...
+     10 000432  010137  175300                  MOV     R1, @#CSR       ; ... operation by writting to CSR
+     11                                 ;
+     12 000436  032767  000001  000000'         BIT     #IEF, FLAGS     ; Interrupt mode?
+     13 000444  001403                          BEQ     1$              ; No - poll CSR
+     14 000446  004767  000610                  CALL    WRINT           ; Yes - wait for interrupt flag
+     15 000452  000410                          BR      2$
+     16 000454  004767  000542          1$:     CALL    WRDY            ; Poll the CSR to detect completion
+     17                                 ;
+     18                                 ; Reset RIB to 0 by writing 1 to it
+     19 000460  013701  175300                  MOV     @#CSR, R1       ; Get CSR value
+     20 000464  042701  120000                  BIC     #ERRB!TIB, R1   ; Protect TIB and ERRB
+     21 000470  010137  175300                  MOV     R1, @#CSR       ; Reset RIB
+     22                                 ;
+     23 000474  004767  000622          2$:     CALL    PRTINF
+     24 000500  012601                          MOV     (SP)+, R1
+     25 000502  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 9
+Address registers section
+
+      1                                         .SBTTL  Address registers section
+      2                                 ;------------------------------------------------------------------
+      3                                 ; Call subroutine to change WAR (input mode)
+      4                                 ;
+      5 000504                          CNGWAR::
+      6 000504  010246                          MOV     R2, -(SP)
+      7 000506  012702  000001                  MOV     #1, R2
+      8 000512  004767  000022                  CALL    WRTREG
+      9 000516  012602                          MOV     (SP)+, R2
+     10 000520  000207                          RETURN
+     11                                 ;
+     12                                 ;------------------------------------------------------------------
+     13                                 ; Call subroutine to change RAR (input mode)
+     14                                 ;
+     15 000522                          CNGRAR::
+     16 000522  010246                          MOV     R2, -(SP)
+     17 000524  012702  000001                  MOV     #1, R2
+     18 000530  004767  000100                  CALL    RDRREG
+     19 000534  012602                          MOV     (SP)+, R2
+     20 000536  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 10
+Address registers section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Change WAR (write-address-register)
+      3                                 ;
+      4 000540                          WRTREG::
+      5 000540  010146                          MOV     R1, -(SP)
+      6 000542                                  .PRINT  #WACMSG
+      7 000550  013701  175306                  MOV     @#WRADDR, R1    ; Get WAR value
+      8 000554  042701  176000                  BIC     #176000, R1     ; Clear all except address bits
+      9 000560  005702                          TST     R2              ; Input mode?
+     10 000562  001415                          BEQ     1$              ; No - skip input section
+     11 000564                                  .PRINT  #WAIHDR         ; Yes - print prompt and ...
+     12 000572  010100                          MOV     R1, R0          ; ... current WAR ...
+     13 000574  004767  000000G                 CALL    PRTDEU          ; ... value
+     14 000600                                  .PRINT  #WAIMSG
+     15 000606  004767  000000G                 CALL    INDEC           ; Input new value
+     16 000612  103406                          BCS     2$              ; If error - return
+     17 000614  010001                          MOV     R0, R1          ; No error - conctinue
+     18                                 ;
+     19 000616  004767  001012          1$:     CALL    DATNUM          ; Get number of bytes
+     20 000622  050001                          BIS     R0, R1          ; Combine all together
+     21 000624  010137  175306                  MOV     R1, @#WRADDR    ; Move to WAR
+     22                                 ;
+     23 000630                          2$:
+     24                                 ;       CLR     R0              ; Print ...
+     25                                 ;       .PRINT                  ; ... <LF><CR>
+     26 000630  012601                          MOV     (SP)+, R1
+     27 000632  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 11
+Address registers section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Change RAR (read-address-register)
+      3                                 ;
+      4 000634                          RDRREG::
+      5 000634  010146                          MOV     R1, -(SP)
+      6 000636                                  .PRINT  #RACMSG
+      7 000644  013701  175304                  MOV     @#RDADDR, R1    ; Get WAR value
+      8 000650  042701  176000                  BIC     #176000, R1     ; Clear all except address bits
+      9 000654  005702                          TST     R2              ; Input mode?
+     10 000656  001415                          BEQ     1$              ; No - skip input section
+     11 000660                                  .PRINT  #RAIHDR         ; Yes - print prompt and ...
+     12 000666  010100                          MOV     R1, R0          ; ... current RAR ...
+     13 000670  004767  000000G                 CALL    PRTDEU          ; ... value
+     14 000674                                  .PRINT  #RAIMSG
+     15 000702  004767  000000G                 CALL    INDEC           ; Input new value
+     16 000706  103406                          BCS     2$              ; If error - return, ...
+     17 000710  010001                          MOV     R0, R1
+     18                                 ;
+     19 000712  004767  000716          1$:     CALL    DATNUM          ; Get number of bytes
+     20 000716  050001                          BIS     R0, R1          ; Combine all together
+     21 000720  010137  175304                  MOV     R1, @#RDADDR    ; Move to Write-Address-Register
+     22                                 ;
+     23 000724  012601                  2$:     MOV     (SP)+, R1
+     24 000726  000207                          RETURN
+     25
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 12
+Change section
+
+      1                                         .SBTTL  Change section
+      2                                 ;------------------------------------------------------------------
+      3                                 ; Change number of bytes
+      4                                 ;
+      5 000730                          CHNBYT::
+      6 000730  010246                          MOV     R2, -(SP)
+      7 000732                                  .PRINT  #BYTMSG
+      8 000740  004767  000000G                 CALL    INDEC           ; Input new value
+      9 000744  103407                          BCS     1$              ; If error - return, ...
+     10 000746  010067  000002'                 MOV     R0, COUNT       ; ... else - store new value
+     11 000752  005002                          CLR     R2              ; Set non-input mode
+     12 000754  004767  177560                  CALL    WRTREG          ; Change WAR
+     13 000760  004767  177650                  CALL    RDRREG          ; Change RAR
+     14                                 ;
+     15 000764                          1$:
+     16 000764  005000                          CLR     R0              ; Print ...
+     17 000766                                  .PRINT                  ; ... <LF><CR>
+     18 000770  012602                          MOV     (SP)+, R2
+     19 000772  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 13
+Change section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Change value
+      3                                 ;
+      4 000774                          CNGVAL::
+      5 000774                                  .PRINT  #VALMSG
+      6 001002  004767  000000G                 CALL    INDEC           ; Input new value
+      7 001006  103402                          BCS     1$              ; If error - return, ...
+      8 001010  010067  000004'                 MOV     R0, WRTVAL      ; ... else - store new value
+      9                                 ;
+     10 001014  005000                  1$:     CLR     R0              ; Print ...
+     11 001016                                  .PRINT                  ; ... <LF><CR>
+     12 001020  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 14
+Interrupt section
+
+      1                                         .SBTTL  Interrupt section
+      2                                 ;------------------------------------------------------------------
+      3                                 ; Set/reset interrupt mode
+      4                                 ;
+      5 001022                          INTMOD::
+      6 001022  032737  000100  175300          BIT     #IEB, @#CSR     ; Test IE bit in CSR
+      7 001030  001406                          BEQ     1$              ; If '0' - jump to set, else ...
+      8 001032  042737  000100  175300          BIC     #IEB, @#CSR     ; ... reset the bit, ...
+      9 001040  012700  001446'                 MOV     #IDMSG, R0      ; ... info line address to R0 ...
+     10 001044  000404                          BR      2$              ; ... and jump to print
+     11 001046  004767  000116          1$:     CALL    SETINT          ; Set interrupt mode, ...
+     12 001052  012700  001474'                 MOV     #IEMSG, R0      ; ...  info line address to R0
+     13 001056                          2$:     .PRINT                  ; Print info
+     14 001060  004767  000352                  CALL    PRTCSR          ; Print CSR value
+     15 001064  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 15
+Interrupt section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Interrupt processing routine
+      3                                 ;
+      4 001066                          MODINT::
+      5 001066  042767  000010  000000'         BIC     #ERF, FLAGS     ; Clear error flag
+      6 001074  013700  175300                  MOV     @#CSR, R0       ; Get CSR value
+      7 001100  032700  100000                  BIT     #ERRB, R0       ; Check error state
+      8 001104  001403                          BEQ     I.CONT          ; No - continue
+      9 001106  052767  000010  000000'         BIS     #ERF, FLAGS
+     10 001114  032700  040000          I.CONT: BIT     #RIB, R0        ; If RIB is not set to '1' then
+     11 001120  001410                          BEQ     I.TX            ; process TX-interrupt
+     12                                 ; Process receive interrupt
+     13 001122  042700  120000                  BIC     #ERRB!TIB, R0   ; Protect TIB and ERRB
+     14 001126  010037  175300                  MOV     R0, @#CSR       ; Reset RIB to '0' by witting ...
+     15                                                                 ; ... '1' to it
+     16 001132  052767  000004  000000'         BIS     #RXF, FLAGS     ; Set receive flag
+     17 001140  000412                          BR      I.FIN
+     18                                 ; Process transmit interrupt
+     19 001142  032700  020000          I.TX:   BIT     #TIB, R0        ; If TIB is not set to '1' ...
+     20 001146  001407                          BEQ     I.FIN           ; ... then return
+     21 001150  042700  140000                  BIC     #ERRB!RIB, R0   ; Protect RIB and ERRB
+     22 001154  010037  175300                  MOV     R0, @#CSR       ; Reset TIB to '0' by witting ...
+     23                                                                 ; ... '1' to it
+     24 001160  052767  000002  000000'         BIS     #TXF, FLAGS     ; Set transmit flag
+     25 001166                          I.FIN:
+     26 001166  000002                          RTI                     ; Return to caller
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 16
+Interrupt section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Set interrupt mode
+      3                                 ;
+      4 001170                          SETINT::
+      5 001170  012767  001066' 000310'         MOV     #MODINT, MODVEC ; Set address of interrupt handler ...
+      6 001176  012767  000340  000312'         MOV     #PRI07, MODVEC+2 ; ... and new IPL
+      7 001204  042767  000006  000000'         BIC     #TXF!RXF, FLAGS ; Clear RX/TX flags
+      8 001212  052737  000100  175300          BIS     #IEB, @#CSR     ; Enable interrupt
+      9 001220  000207                          RTS     PC
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 17
+Wait section
+
+      1                                         .SBTTL  Wait section
+      2                                 ;------------------------------------------------------------------
+      3                                 ; Wair for ready bit (needs timeout part)
+      4                                 ;
+      5 001222                          WRDY::
+      6 001222  042767  000010  000000'         BIC     #ERF, FLAGS     ; Clear error flag
+      7 001230  013700  175300          1$:     MOV     @#CSR, R0       ; Get CSR value
+      8 001234  032700  100000                  BIT     #ERRB, R0       ; Check error
+      9 001240  001004                          BNE     2$              ; If yes - exit
+     10 001242  132700  000200                  BITB    #RDYB, R0       ; Wait for ready ...
+     11 001246  001770                          BEQ     1$              ; ... bit
+     12 001250  000207                          RETURN
+     13 001252  052767  000010  000000' 2$:     BIS     #ERF, FLAGS     ; Set error flag
+     14 001260  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 18
+Wait section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Wait for receive interupt flag (needs timeout part)
+      3                                 ;
+      4 001262                          WRINT::
+      5 001262  032767  000004  000000' 1$:     BIT     #RXF, FLAGS
+      6 001270  001774                          BEQ     1$
+      7 001272  042767  000004  000000'         BIC     #RXF, FLAGS
+      8 001300  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 19
+Wait section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Wait for transmit interupt flag (needs timeout part)
+      3                                 ;
+      4 001302                          WTINT::
+      5 001302  032767  000002  000000' 1$:     BIT     #TXF, FLAGS
+      6 001310  001774                          BEQ     1$
+      7 001312  042767  000002  000000'         BIC     #TXF, FLAGS
+      8 001320  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 20
+Print info section
+
+      1                                         .SBTTL  Print info section
+      2                                 ;------------------------------------------------------------------
+      3                                 ; Print info/regs.
+      4                                 ;
+      5 001322                          PRTINF::
+      6 001322  004767  000110                   CALL   PRTCSR
+      7 001326                                  .PRINT  #ERRHDR
+      8 001334  013700  175310                  MOV     @#ERREG, R0
+      9 001340  004767  000000G                 CALL    PRTOCT
+     10 001344                                  .PRINT  #IWRHDR
+     11 001352  013700  175314                  MOV     @#IWRREG, R0
+     12 001356  004767  000000G                 CALL    PRTOCT
+     13 001362                                  .PRINT  #IRDHDR
+     14 001370  013700  175312                  MOV     @#IRDREG, R0
+     15 001374  004767  000000G                 CALL    PRTOCT
+     16 001400                                  .PRINT  #NBHDR
+     17 001406  016700  000002'                 MOV     COUNT, R0
+     18 001412  004767  000000G                 CALL    PRTDEU
+     19                                 ;       .PRINT  #EADHDR
+     20                                 ;       MOV     EADDR, R0
+     21                                 ;       CALL    PRTDEU
+     22 001416                                  .PRINT  #VALHDR
+     23 001424  016700  000004'                 MOV     WRTVAL, R0
+     24 001430  004767  000000G                 CALL    PRTDEU
+     25                                 ;       BIT     #IEF, FLAGS
+     26                                 ;       BEQ     1$
+     27                                 ;       CALL    IFPRT
+     28 001434  000207                  1$:     RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 21
+Print info section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Print CSR value
+      3                                 ;
+      4 001436                          PRTCSR::
+      5 001436  010146                          MOV     R1, -(SP)
+      6 001440                                  .PRINT  #CSRHDR
+      7 001446  013701  175300                  MOV     @#CSR, R1       ; Get CSR value
+      8 001452  010100                          MOV     R1, R0
+      9 001454  004767  000000G                 CALL    PRTOCT          ; Print it
+     10 001460  032701  000100                  BIT     #IEB, R1        ; Test IE bit
+     11 001464  001406                          BEQ     1$              ; IE = '0' - jump to info section
+     12 001466  052767  000001  000000'         BIS     #IEF, FLAGS     ; IE = '1' - set flag, ...
+     13 001474  012701  000061                  MOV     #'1, R1         ; ... put '1' to R1 ...
+     14 001500  000405                          BR      2$              ; ... and jump to print
+     15 001502  042767  000001  000000' 1$:     BIC     #IEF, FLAGS     ; IE = '0' - clear flag and ...
+     16 001510  012701  000060                  MOV     #'0, R1         ; ... put '0' to R1
+     17 001514                          2$:     .PRINT  #IEBHDR
+     18 001522  010100                          MOV     R1, R0          ; R1 -> R0 ...
+     19 001524                                  .TTYOUT                 ; ... and output
+     20 001530  012601                          MOV     (SP)+, R1
+     21 001532  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 22
+Print info section
+
+      1                                 ;------------------------------------------------------------------
+      2                                 ; Print interrup flags
+      3 001534                          IFPRT::
+      4 001534  010146                          MOV     R1, -(SP)
+      5 001536  016701  000000'                 MOV     FLAGS, R1
+      6 001542                                  .PRINT  #IRXHDR
+      7 001550  010100                          MOV     R1, R0
+      8 001552  072027  177776                  ASH     #-2, R0
+      9 001556  042700  177776                  BIC     #^C1, R0
+     10 001562  004767  000000G                 CALL    PRTDEU
+     11 001566                                  .PRINT  #ITXHDR
+     12 001574  010100                          MOV     R1, R0
+     13 001576  006200                          ASR     R0
+     14 001600  042700  177776                  BIC     #^C1, R0
+     15 001604  004767  000000G                 CALL    PRTDEU
+     16 001610                                  .PRINT  #IERHDR
+     17 001616  010100                          MOV     R1, R0
+     18 001620  072027  177775                  ASH     #-3, R0
+     19                                 ;       BIC     #^C1, R0
+     20 001624  004767  000000G                 CALL    PRTDEU
+     21 001630  012601                          MOV     (SP)+, R1
+     22 001632  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 23
+Misc. subroutines
+
+      1                                         .SBTTL  Misc. subroutines
+      2                                 ;------------------------------------------------------------------
+      3                                 ; Put number of bytes in right position and return it in R0
+      4                                 ;
+      5 001634  016700  000002'         DATNUM: MOV     COUNT, R0
+      6 001640  006100                          ROL     R0
+      7 001642  006100                          ROL     R0
+      8 001644  000300                          SWAB    R0
+      9 001646  000207                          RETURN
+     10                                 ;
+     11                                 ;------------------------------------------------------------------
+     12                                 ; Stub for printing information
+     13                                 ;
+     14 001650                          PRTREG: .PRINT  #REGMSG
+     15 001656  004767  177440                  CALL    PRTINF
+     16 001662  000207                          RETURN
+     17                                 ;
+     18                                 ;------------------------------------------------------------------
+     19                                 ; Pause
+     20 001664                          PAUSE:  .PRINT  #PAUHDR
+     21 001672  052737  010000  000044          BIS     #TTSPC$, @#JSW
+     22 001700                          1$:     .TTYINR
+     23 001704  103775                          BCS     1$
+     24 001706  120027  000040                  CMPB    R0, #40
+     25 001712  001372                          BNE     1$
+     26 001714  042737  010000  000044          BIC     #TTSPC$, @#JSW
+     27 001722                                  .PRINT  #PAUMSG
+     28 001730  000207                          RETURN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 24
+Executation table
+
+      1                                         .SBTTL  Executation table
+      2                                 ;
+      3 001732  000072'                 ADREXE: .WORD   RESET
+      4 001734  000124'                         .WORD   WRTDAT
+      5 001736  000204'                         .WORD   RDRDAT
+      6 001740  000504'                         .WORD   CNGWAR
+      7 001742  000522'                         .WORD   CNGRAR
+      8 001744  001650'                         .WORD   PRTREG
+      9 001746  000730'                         .WORD   CHNBYT
+     10 001750  000774'                         .WORD   CNGVAL
+     11 001752  001022'                         .WORD   INTMOD
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 25
+Data section
+
+      1                                         .SBTTL  Data section
+      2 000000                                  .PSECT  $DATA, D, RW
+      3                                 ;
+      4 000000  000000                  FLAGS:: .WORD   0
+      5                                 ;
+      6 000002  000005                  COUNT:  .WORD   5               ; Number of bytes
+      7 000004  000001                  WRTVAL: .WORD   1               ; Initial value
+      8 000006                          BUFF:   .BLKB   82.             ; Character buffer
+      9                                         .EVEN
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 26
+Text section
+
+      1                                         .SBTTL  Text section
+      2 000000                                  .PSECT  $TEXT, D, RO
+      3                                 ;
+      4 000000     015     012     012  PROMPT: .ASCII  <15><12><12>
+      5 000003     055     055     055          .ASCII  |---------------------|<12><15>
+        000006     055     055     055
+        000011     055     055     055
+        000014     055     055     055
+        000017     055     055     055
+        000022     055     055     055
+        000025     055     055     055
+        000030     012     015
+      6 000032     040     122     145          .ASCII  ! Reset           - 0!<12><15>
+        000035     163     145     164
+        000040     040     040     040
+        000043     040     040     040
+        000046     040     040     040
+        000051     040     040     055
+        000054     040     060     012
+        000057     015
+      7 000060     040     127     162          .ASCII  ! Write data      - 1!<12><15>
+        000063     151     164     145
+        000066     040     144     141
+        000071     164     141     040
+        000074     040     040     040
+        000077     040     040     055
+        000102     040     061     012
+        000105     015
+      8 000106     040     122     145          .ASCII  ! Read  data      - 2!<12><15>
+        000111     141     144     040
+        000114     040     144     141
+        000117     164     141     040
+        000122     040     040     040
+        000125     040     040     055
+        000130     040     062     012
+        000133     015
+      9 000134     040     111     156          .ASCII  ! Init write-reg  - 3!<12><15>
+        000137     151     164     040
+        000142     167     162     151
+        000145     164     145     055
+        000150     162     145     147
+        000153     040     040     055
+        000156     040     063     012
+        000161     015
+     10 000162     040     111     156          .ASCII  ! Init read-reg   - 4!<12><15>
+        000165     151     164     040
+        000170     162     145     141
+        000173     144     055     162
+        000176     145     147     040
+        000201     040     040     055
+        000204     040     064     012
+        000207     015
+     11 000210     040     120     162          .ASCII  ! Print regs/info - 5!<12><15>
+        000213     151     156     164
+        000216     040     162     145
+        000221     147     163     057
+        000224     151     156     146
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 26-1
+Text section
+
+        000227     157     040     055
+        000232     040     065     012
+        000235     015
+     12 000236     040     116     165          .ASCII  ! Number of bytes - 6!<12><15>
+        000241     155     142     145
+        000244     162     040     157
+        000247     146     040     142
+        000252     171     164     145
+        000255     163     040     055
+        000260     040     066     012
+        000263     015
+     13                                 ;       .ASCII  ! EEPROM address  - 7!<12><15>
+     14 000264     040     126     141          .ASCII  ! Value to write  - 7!<12><15>
+        000267     154     165     145
+        000272     040     164     157
+        000275     040     167     162
+        000300     151     164     145
+        000303     040     040     055
+        000306     040     067     012
+        000311     015
+     15 000312     040     123     145          .ASCII  ! Set/reset int.  - 8!<12><15>
+        000315     164     057     162
+        000320     145     163     145
+        000323     164     040     151
+        000326     156     164     056
+        000331     040     040     055
+        000334     040     070     012
+        000337     015
+     16 000340     055     055     055          .ASCII  !---------------------!<12><15>
+        000343     055     055     055
+        000346     055     055     055
+        000351     055     055     055
+        000354     055     055     055
+        000357     055     055     055
+        000362     055     055     055
+        000365     012     015
+     17 000367     103     150     157          .ASCII  /Choice: /<200>
+        000372     151     143     145
+        000375     072     040     200
+     18 000400     012     015     040  RESMSG: .ASCIZ  <12><15>/ *** Reset ***/
+        000403     052     052     052
+        000406     040     122     145
+        000411     163     145     164
+        000414     040     052     052
+        000417     052     000
+     19 000421     012     015     040  WRTMSG: .ASCIZ  <12><15>/ *** Fill output buffer ***/
+        000424     052     052     052
+        000427     040     106     151
+        000432     154     154     040
+        000435     157     165     164
+        000440     160     165     164
+        000443     040     142     165
+        000446     146     146     145
+        000451     162     040     052
+        000454     052     052     000
+     20 000457     012     015     040  RDRMSG: .ASCIZ  <12><15>/ *** Read from input buffer ****/
+        000462     052     052     052
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 26-2
+Text section
+
+        000465     040     122     145
+        000470     141     144     040
+        000473     146     162     157
+        000476     155     040     151
+        000501     156     160     165
+        000504     164     040     142
+        000507     165     146     146
+        000512     145     162     040
+        000515     052     052     052
+        000520     052     000
+     21 000522     012     015     040  WOPMSG: .ASCIZ  <12><15>/ *** Write operation ***/
+        000525     052     052     052
+        000530     040     127     162
+        000533     151     164     145
+        000536     040     157     160
+        000541     145     162     141
+        000544     164     151     157
+        000547     156     040     052
+        000552     052     052     000
+     22 000555     012     015     040  ROPMSG: .ASCIZ  <12><15>/ *** Read operation ***/
+        000560     052     052     052
+        000563     040     122     145
+        000566     141     144     040
+        000571     157     160     145
+        000574     162     141     164
+        000577     151     157     156
+        000602     040     052     052
+        000605     052     000
+     23 000607     012     015     040  REGMSG: .ASCIZ  <12><15>| *** Registers/info ***|
+        000612     052     052     052
+        000615     040     122     145
+        000620     147     151     163
+        000623     164     145     162
+        000626     163     057     151
+        000631     156     146     157
+        000634     040     052     052
+        000637     052     000
+     24 000641     012     015     040  WACMSG: .ASCIZ  <12><15>/ *** Change write-address-register ***/
+        000644     052     052     052
+        000647     040     103     150
+        000652     141     156     147
+        000655     145     040     167
+        000660     162     151     164
+        000663     145     055     141
+        000666     144     144     162
+        000671     145     163     163
+        000674     055     162     145
+        000677     147     151     163
+        000702     164     145     162
+        000705     040     052     052
+        000710     052     000
+     25 000712     012     015     040  RACMSG: .ASCIZ  <12><15>/ *** Change read-address-register ***/
+        000715     052     052     052
+        000720     040     103     150
+        000723     141     156     147
+        000726     145     040     162
+        000731     145     141     144
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 26-3
+Text section
+
+        000734     055     141     144
+        000737     144     162     145
+        000742     163     163     055
+        000745     162     145     147
+        000750     151     163     164
+        000753     145     162     040
+        000756     052     052     052
+        000761     000
+     26 000762     040     103     123  CSRHDR: .ASCII  / CSR = /<200>
+        000765     122     040     075
+        000770     040     200
+     27 000772     012     015     040  ERRHDR: .ASCII  <12><15>/ ERRORS = /<200>
+        000775     105     122     122
+        001000     117     122     123
+        001003     040     075     040
+        001006     200
+     28 001007     040     040     040  IWRHDR: .ASCII  /   WR-REGS = /<200>
+        001012     127     122     055
+        001015     122     105     107
+        001020     123     040     075
+        001023     040     200
+     29 001025     040     040     040  IRDHDR: .ASCII  /   RD-REGS = /<200>
+        001030     122     104     055
+        001033     122     105     107
+        001036     123     040     075
+        001041     040     200
+     30 001043     012     015     040  NBHDR:  .ASCII  <12><15>/ NBytes = /<200>
+        001046     116     102     171
+        001051     164     145     163
+        001054     040     075     040
+        001057     200
+     31 001060     040     040     040  VALHDR: .ASCII  /   Value = /<200>
+        001063     126     141     154
+        001066     165     145     040
+        001071     075     040     200
+     32 001074     040     040     040  IEBHDR: .ASCII  /   IE = /<200>
+        001077     111     105     040
+        001102     075     040     200
+     33 001105     040     127     162  WAIHDR: .ASCII  / Write address register = /<200>
+        001110     151     164     145
+        001113     040     141     144
+        001116     144     162     145
+        001121     163     163     040
+        001124     162     145     147
+        001127     151     163     164
+        001132     145     162     040
+        001135     075     040     200
+     34 001140     040     122     145  RAIHDR: .ASCII  / Read address register = /<200>
+        001143     141     144     040
+        001146     141     144     144
+        001151     162     145     163
+        001154     163     040     162
+        001157     145     147     151
+        001162     163     164     145
+        001165     162     040     075
+        001170     040     200
+     35 001172     040     122     130  IRXHDR: .ASCII  / RXDONE = /<200>
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 26-4
+Text section
+
+        001175     104     117     116
+        001200     105     040     075
+        001203     040     200
+     36 001205     040     040     040  ITXHDR: .ASCII  /   TXDONE = /<200>
+        001210     124     130     104
+        001213     117     116     105
+        001216     040     075     040
+        001221     200
+     37 001222     040     040     040  IERHDR: .ASCII  /   ERRFLG = /<200>
+        001225     105     122     122
+        001230     106     114     107
+        001233     040     075     040
+        001236     200
+     38 001237     012     015     040  PAUHDR: .ASCII  <12><15>/ Press SPACE/<200>
+        001242     120     162     145
+        001245     163     163     040
+        001250     123     120     101
+        001253     103     105     200
+     39 001256     015     040     040  PAUMSG: .ASCII  <15>/            /<15><200>
+        001261     040     040     040
+        001264     040     040     040
+        001267     040     040     040
+        001272     040     015     200
+     40 001275     012     015     040  BYTMSG: .ASCII  <12><15>/ Enter new byte number :/<200>
+        001300     105     156     164
+        001303     145     162     040
+        001306     156     145     167
+        001311     040     142     171
+        001314     164     145     040
+        001317     156     165     155
+        001322     142     145     162
+        001325     040     072     200
+     41 001330     012     015     040  WAIMSG: .ASCII  <12><15>/ Enter new write address :/<200>
+        001333     105     156     164
+        001336     145     162     040
+        001341     156     145     167
+        001344     040     167     162
+        001347     151     164     145
+        001352     040     141     144
+        001355     144     162     145
+        001360     163     163     040
+        001363     072     200
+     42 001365     012     015     040  RAIMSG: .ASCII  <12><15>/ Enter new read address :/<200>
+        001370     105     156     164
+        001373     145     162     040
+        001376     156     145     167
+        001401     040     162     145
+        001404     141     144     040
+        001407     141     144     144
+        001412     162     145     163
+        001415     163     040     072
+        001420     200
+     43 001421     012     015     040  VALMSG: .ASCII  <12><15>/ Enter new value: /<200>
+        001424     105     156     164
+        001427     145     162     040
+        001432     156     145     167
+        001435     040     166     141
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 26-5
+Text section
+
+        001440     154     165     145
+        001443     072     040     200
+     44 001446     012     015     040  IDMSG:  .ASCIZ  <12><15>/ Interrupt disabled/
+        001451     111     156     164
+        001454     145     162     162
+        001457     165     160     164
+        001462     040     144     151
+        001465     163     141     142
+        001470     154     145     144
+        001473     000
+     45 001474     012     015     040  IEMSG:  .ASCIZ  <12><15>/ Interrupt enabled/
+        001477     111     156     164
+        001502     145     162     162
+        001505     165     160     164
+        001510     040     145     156
+        001513     141     142     154
+        001516     145     144     000
+     46 001521     012     015     000  EOL:    .ASCIZ  <12><15>
+     47                                         .EVEN
+     48         000000'                         .END START
+EPRMHD -- EEPROM I2C module tes MACRO V05.06  Tuesday 10-Oct-23 00:07  Page 26-6
+Symbol table
+
+ADREXE  001732R         IDMSG   001446R     003 JSW   = 000044          RAIHDR  001140R     003 TXF   = 000002
+BUFF    000006R     002 IEB   = 000100          MODINT  001066RG        RAIMSG  001365R     003 VALHDR  001060R     003
+BYTMSG  001275R     003 IEBHDR  001074R     003 MODVEC= 000310          RDADDR= 175304          VALMSG  001421R     003
+CHNBYT  000730RG        IEF   = 000001          M.RDR = 000005          RDRDAT  000204RG        WACMSG  000641R     003
+CNGRAR  000522RG        IEMSG   001474R     003 M.RST = 000001          RDRMSG  000457R     003 WAIHDR  001105R     003
+CNGVAL  000774RG        IERHDR  001222R     003 M.WRT = 000003          RDROP   000406RG        WAIMSG  001330R     003
+CNGWAR  000504RG        IFPRT   001534RG        NBHDR   001043R     003 RDRREG  000634RG        WOPMSG  000522R     003
+COUNT   000002R     002 INDEC = ****** GX       PAUHDR  001237R     003 RDYB  = 000200          WRADDR= 175306
+CSR   = 175300          INTMOD  001022RG        PAUMSG  001256R     003 REGMSG  000607R     003 WRDY    001222RG
+CSRHDR  000762R     003 IRDHDR  001025R     003 PAUSE   001664R         RESET   000072RG        WRINT   001262RG
+DATARW= 175302          IRDREG= 175312          PRI07 = 000340          RESMSG  000400R     003 WRTDAT  000124RG
+DATNUM  001634R         IRXHDR  001172R     003 PROMPT  000000R     003 RIB   = 040000          WRTMSG  000421R     003
+EOL     001521R     003 ITXHDR  001205R     003 PRTCSR  001436RG        ROPMSG  000555R     003 WRTOP   000310RG
+ERF   = 000010          IWRHDR  001007R     003 PRTDEU= ****** GX       RXF   = 000004          WRTREG  000540RG
+ERRB  = 100000          IWRREG= 175314          PRTINF  001322RG        SETINT  001170RG        WRTVAL  000004R     002
+ERREG = 175310          I.CONT  001114R         PRTOCT= ****** GX       START   000000RG        WTINT   001302RG
+ERRHDR  000772R     003 I.FIN   001166R         PRTREG  001650R         TIB   = 020000          ...V1 = 000003
+FLAGS   000000RG    002 I.TX    001142R         RACMSG  000712R     003 TTSPC$= 010000
+
+. ABS.  000000    000   (RW,I,GBL,ABS,OVR)
+        001754    001   (RW,I,LCL,REL,CON)
+$DATA   000130    002   (RW,D,LCL,REL,CON)
+$TEXT   001524    003   (RO,D,LCL,REL,CON)
+Errors detected:  0
+
+*** Assembler statistics
+
+
+Work  file  reads: 10
+Work  file writes: 16
+Size of work file: 10832 Words  ( 43 Pages)
+Size of core pool: 9472 Words  ( 37 Pages)
+Operating  system: RT-11
+
+Elapsed time: 00:00:03.26
+,DK:EEPROM=DK:EEPROM

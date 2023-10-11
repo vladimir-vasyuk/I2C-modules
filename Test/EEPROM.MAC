@@ -1,0 +1,487 @@
+	.TITLE	EEPROM -- EEPROM I2C module test
+	.IDENT	/X1.10/
+.REM %
+Test functions of the EEPROM nodule.
+
+To link use command:	LINK EEPROM,PRTVAL,INP
+To exit just press <Enter> when promted (Choice)
+%
+	.MCALL	.PRINT, .EXIT, .TTYOUT, .TTYIN, .TTYINR
+	.INCLUDE /EEPROM.INC/
+;
+JSW	= 44	; Job status word
+TTSPC$	= 10000	; Special terminal mode
+;
+	.PSECT
+;
+START::	CALL    PRTINF
+1$:	.PRINT  #PROMPT	; Print info header
+	MOV     #BUFF, R1
+2$:	.TTYIN			; Get a character from keyboard
+	CMPB    R0, #12		; Is the character LF
+	BEQ     3$		; Yes - break
+	MOVB    R0, (R1)+	; No - put the character to buffer
+	BR      2$		; Loop
+3$:	TSTB    BUFF		; Nothing entered?
+	BEQ     20$		; Branch if nothing entered
+	MOVB    BUFF, R1	; Get first byte
+	SUB     #60, R1		; Convert to digit
+	CMPB    R1, #8.		; More than limit?
+	BHI     20$		; Yes - exit
+	ASL     R1		; Mult by 2
+	CALL    @ADREXE(R1)	; Jump to execution
+	BR      1$		; Go back for more
+20$:	.EXIT			; Exit program on null input
+
+	.SBTTL  Operations section
+;------------------------------------------------------------------
+; Reset operation
+;
+RESET::
+	.PRINT  #RESMSG
+	MOV     #M.RST, @#CSR	; Call reset function
+1$:	BITB    #RDYB, @#CSR	; Wait for ready ...
+	BEQ     1$		; ... bit
+	CALL    PRTCSR		; Print CSR value
+;	.PRINT  #EOL
+	RETURN
+;------------------------------------------------------------------
+; Write data to buffer
+;
+WRTDAT::
+	.PRINT  #WRTMSG
+	MOV     COUNT, R5	; Loop counter
+	BEQ     2$		; If '0' - write operation
+1$:	MOV     WRTVAL, @#DATARW ; Write data to buffer
+	BIT     #ERRB, @#CSR	; Check error bit
+	BNE     3$		; If error - break the loop.
+	INCB    WRTVAL		; Else - inc. value ...
+	SOB     R5, 1$		; ... and loop
+2$:	CALL    PAUSE
+	CALL    WRTOP		; Write operation
+	RETURN
+3$:	CALL    PRTINF
+	RETURN
+;------------------------------------------------------------------
+; Read data from buffer
+;
+RDRDAT::
+	CALL    RDROP		; Read operation
+	BIT     #ERF, FLAGS	; Error?
+	BEQ     1$		; No - continue
+	RETURN			; Yes - return
+1$:	CALL    PAUSE
+	.PRINT  #RDRMSG
+	MOV     COUNT, R5	; Loop counter
+2$:	MOVB    @#DATARW, R0	; Read data from buffer
+	BIT     #ERRB, @#CSR	; Check error bit
+	BNE     3$		; If error - break the loop.
+	BIC     #177400, R0	; Clear high byte (for ...
+				; ... correct output only)
+	CALL    PRTDEU		; Print data value, ...
+	MOV     #' ,R0		; ... print ...
+	.TTYOUT	; ... space, ...
+	SOB     R5, 2$		; and loop
+3$:	CLR     R0		; Print ...
+	.PRINT			; ... <LF><CR>
+	CALL    PRTINF
+	RETURN
+;------------------------------------------------------------------
+; Write operation
+;
+WRTOP::
+	MOV     R1, -(SP)
+	.PRINT  #WOPMSG
+	MOV     @#CSR, R1	; Get CSR value
+	BIC     #7, R1		; Clear operation bits
+	BIS     #M.WRT, R1	; Set correct bits and start the ...
+	MOV     R1, @#CSR	; ... operation by writting to CSR
+;
+	BIT     #IEF, FLAGS	; Interrupt mode?
+	BEQ     1$		; No - poll CSR
+	CALL    WTINT		; Yes - wait for interrupt flag
+	BR      2$
+1$:	CALL    WRDY	; Poll the CSR to detect completion
+;
+; Reset TIB to 0 by writing 1 to it
+	MOV     @#CSR, R1	; Get CSR value
+	BIC     #ERRB!RIB, R1	; Protect RIB and ERRB
+	MOV     R1, @#CSR	; Reset TIB
+;
+2$:	CALL    PRTINF
+	MOV     (SP)+, R1
+	RETURN
+;------------------------------------------------------------------
+; Read operation
+;
+RDROP::
+	MOV     R1, -(SP)
+	.PRINT  #ROPMSG
+	MOV     @#CSR, R1	; Get CSR value
+	BIC     #7, R1	; Clear operation bits
+	BIS     #M.RDR, R1	; Set correct bits and start the ...
+	MOV     R1, @#CSR	; ... operation by writting to CSR
+;
+	BIT     #IEF, FLAGS	; Interrupt mode?
+	BEQ     1$	; No - poll CSR
+	CALL    WRINT	; Yes - wait for interrupt flag
+	BR      2$
+1$:	CALL    WRDY	; Poll the CSR to detect completion
+;
+; Reset RIB to 0 by writing 1 to it
+	MOV     @#CSR, R1	; Get CSR value
+	BIC     #ERRB!TIB, R1	; Protect TIB and ERRB
+	MOV     R1, @#CSR	; Reset RIB
+;
+2$:	CALL    PRTINF
+	MOV     (SP)+, R1
+	RETURN
+	.SBTTL  Address registers section
+;------------------------------------------------------------------
+; Call subroutine to change WAR (input mode)
+;
+CNGWAR::
+	MOV     R2, -(SP)
+	MOV     #1, R2
+	CALL    WRTREG
+	MOV     (SP)+, R2
+	RETURN
+;
+;------------------------------------------------------------------
+; Call subroutine to change RAR (input mode)
+;
+CNGRAR::
+	MOV     R2, -(SP)
+	MOV     #1, R2
+	CALL    RDRREG
+	MOV     (SP)+, R2
+	RETURN
+;------------------------------------------------------------------
+; Change WAR (write-address-register)
+;
+WRTREG::
+	MOV     R1, -(SP)
+	.PRINT  #WACMSG
+	MOV     @#WRADDR, R1	; Get WAR value
+	BIC     #176000, R1	; Clear all except address bits
+	TST     R2	; Input mode?
+	BEQ     1$	; No - skip input section
+	.PRINT  #WAIHDR	; Yes - print prompt and ...
+	MOV     R1, R0	; ... current WAR ...
+	CALL    PRTDEU	; ... value
+	.PRINT  #WAIMSG
+	CALL    INDEC	; Input new value
+	BCS     2$	; If error - return
+	MOV     R0, R1	; No error - conctinue
+;
+1$:	CALL    DATNUM	; Get number of bytes
+	BIS     R0, R1	; Combine all together
+	MOV     R1, @#WRADDR	; Move to WAR
+;
+2$:
+;       CLR     R0	; Print ...
+;       .PRINT	; ... <LF><CR>
+	MOV     (SP)+, R1
+	RETURN
+;------------------------------------------------------------------
+; Change RAR (read-address-register)
+;
+RDRREG::
+	MOV     R1, -(SP)
+	.PRINT  #RACMSG
+	MOV     @#RDADDR, R1	; Get WAR value
+	BIC     #176000, R1	; Clear all except address bits
+	TST     R2	; Input mode?
+	BEQ     1$	; No - skip input section
+	.PRINT  #RAIHDR	; Yes - print prompt and ...
+	MOV     R1, R0	; ... current RAR ...
+	CALL    PRTDEU	; ... value
+	.PRINT  #RAIMSG
+	CALL    INDEC	; Input new value
+	BCS     2$	; If error - return, ...
+	MOV     R0, R1
+;
+1$:	CALL    DATNUM	; Get number of bytes
+	BIS     R0, R1	; Combine all together
+	MOV     R1, @#RDADDR	; Move to Write-Address-Register
+;
+2$:	MOV     (SP)+, R1
+	RETURN
+	.SBTTL  Change section
+;------------------------------------------------------------------
+; Change number of bytes
+;
+CHNBYT::
+	MOV     R2, -(SP)
+	.PRINT  #BYTMSG
+	CALL    INDEC	; Input new value
+	BCS     1$	; If error - return, ...
+	MOV     R0, COUNT	; ... else - store new value
+	CLR     R2	; Set non-input mode
+	CALL    WRTREG	; Change WAR
+	CALL    RDRREG	; Change RAR
+;
+1$:
+	CLR     R0	; Print ...
+	.PRINT	; ... <LF><CR>
+	MOV     (SP)+, R2
+	RETURN
+;------------------------------------------------------------------
+; Change value
+;
+CNGVAL::
+	.PRINT  #VALMSG
+	CALL    INDEC		; Input new value
+	BCS     1$		; If error - return, ...
+	MOV     R0, WRTVAL	; ... else - store new value
+;
+1$:	CLR     R0	; Print ...
+	.PRINT	; ... <LF><CR>
+	RETURN
+	.SBTTL  Interrupt section
+;------------------------------------------------------------------
+; Set/reset interrupt mode
+;
+INTMOD::
+	BIT     #IEB, @#CSR	; Test IE bit in CSR
+	BEQ     1$	; If '0' - jump to set, else ...
+	BIC     #IEB, @#CSR	; ... reset the bit, ...
+	MOV     #IDMSG, R0	; ... info line address to R0 ...
+	BR      2$	; ... and jump to print
+1$:	CALL    SETINT	; Set interrupt mode, ...
+	MOV     #IEMSG, R0	; ...  info line address to R0
+2$:	.PRINT	; Print info
+	CALL    PRTCSR	; Print CSR value
+	RETURN
+;------------------------------------------------------------------
+; Interrupt processing routine
+;
+MODINT::
+	BIC     #ERF, FLAGS	; Clear error flag
+	MOV     @#CSR, R0	; Get CSR value
+	BIT     #ERRB, R0	; Check error state
+	BEQ     I.CONT	; No - continue
+	BIS     #ERF, FLAGS
+I.CONT:	BIT     #RIB, R0	; If RIB is not set to '1' then
+	BEQ     I.TX	; process TX-interrupt
+; Process receive interrupt
+	BIC     #ERRB!TIB, R0	; Protect TIB and ERRB
+	MOV     R0, @#CSR	; Reset RIB to '0' by witting ...
+	; ... '1' to it
+	BIS     #RXF, FLAGS	; Set receive flag
+	BR      I.FIN
+; Process transmit interrupt
+I.TX:	BIT     #TIB, R0	; If TIB is not set to '1' ...
+	BEQ     I.FIN	; ... then return
+	BIC     #ERRB!RIB, R0	; Protect RIB and ERRB
+	MOV     R0, @#CSR	; Reset TIB to '0' by witting ...
+	; ... '1' to it
+	BIS     #TXF, FLAGS	; Set transmit flag
+I.FIN:
+	RTI	; Return to caller
+;------------------------------------------------------------------
+; Set interrupt mode
+;
+SETINT::
+	MOV     #MODINT, MODVEC	; Set address of interrupt handler ...
+	MOV     #PRI07, MODVEC+2	; ... and new IPL
+	BIC     #TXF!RXF, FLAGS	; Clear RX/TX flags
+	BIS     #IEB, @#CSR	; Enable interrupt
+	RTS     PC
+	.SBTTL  Wait section
+;------------------------------------------------------------------
+; Wair for ready bit (needs timeout part)
+;
+WRDY::
+	BIC     #ERF, FLAGS	; Clear error flag
+1$:	MOV     @#CSR, R0	; Get CSR value
+	BIT     #ERRB, R0	; Check error
+	BNE     2$	; If yes - exit
+	BITB    #RDYB, R0	; Wait for ready ...
+	BEQ     1$	; ... bit
+	RETURN
+2$:	BIS     #ERF, FLAGS	; Set error flag
+	RETURN
+;------------------------------------------------------------------
+; Wait for receive interupt flag (needs timeout part)
+;
+WRINT::
+1$:	BIT     #RXF, FLAGS
+	BEQ     1$
+	BIC     #RXF, FLAGS
+	RETURN
+;------------------------------------------------------------------
+; Wait for transmit interupt flag (needs timeout part)
+;
+WTINT::
+1$:	BIT     #TXF, FLAGS
+	BEQ     1$
+	BIC     #TXF, FLAGS
+	RETURN
+	.SBTTL  Print info section
+;------------------------------------------------------------------
+; Print info/regs.
+;
+PRTINF::
+	 CALL   PRTCSR
+	.PRINT  #ERRHDR
+	MOV     @#ERREG, R0
+	CALL    PRTOCT
+	.PRINT  #IWRHDR
+	MOV     @#IWRREG, R0
+	CALL    PRTOCT
+	.PRINT  #IRDHDR
+	MOV     @#IRDREG, R0
+	CALL    PRTOCT
+	.PRINT  #NBHDR
+	MOV     COUNT, R0
+	CALL    PRTDEU
+;       .PRINT  #EADHDR
+;       MOV     EADDR, R0
+;       CALL    PRTDEU
+	.PRINT  #VALHDR
+	MOV     WRTVAL, R0
+	CALL    PRTDEU
+;       BIT     #IEF, FLAGS
+;       BEQ     1$
+;       CALL    IFPRT
+1$:	RETURN
+;------------------------------------------------------------------
+; Print CSR value
+;
+PRTCSR::
+	MOV     R1, -(SP)
+	.PRINT  #CSRHDR
+	MOV     @#CSR, R1	; Get CSR value
+	MOV     R1, R0
+	CALL    PRTOCT	; Print it
+	BIT     #IEB, R1	; Test IE bit
+	BEQ     1$	; IE = '0' - jump to info section
+	BIS     #IEF, FLAGS	; IE = '1' - set flag, ...
+	MOV     #'1, R1	; ... put '1' to R1 ...
+	BR      2$	; ... and jump to print
+1$:	BIC     #IEF, FLAGS	; IE = '0' - clear flag and ...
+	MOV     #'0, R1	; ... put '0' to R1
+2$:	.PRINT  #IEBHDR
+	MOV     R1, R0	; R1 -> R0 ...
+	.TTYOUT	; ... and output
+	MOV     (SP)+, R1
+	RETURN
+;------------------------------------------------------------------
+; Print interrup flags
+IFPRT::
+	MOV     R1, -(SP)
+	MOV     FLAGS, R1
+	.PRINT  #IRXHDR
+	MOV     R1, R0
+	ASH     #-2, R0
+	BIC     #^C1, R0
+	CALL    PRTDEU
+	.PRINT  #ITXHDR
+	MOV     R1, R0
+	ASR     R0
+	BIC     #^C1, R0
+	CALL    PRTDEU
+	.PRINT  #IERHDR
+	MOV     R1, R0
+	ASH     #-3, R0
+;       BIC     #^C1, R0
+	CALL    PRTDEU
+	MOV     (SP)+, R1
+	RETURN
+	.SBTTL  Misc. subroutines
+;------------------------------------------------------------------
+; Put number of bytes in right position and return it in R0
+;
+DATNUM:	MOV     COUNT, R0
+	ROL     R0
+	ROL     R0
+	SWAB    R0
+	RETURN
+;
+;------------------------------------------------------------------
+; Stub for printing information
+;
+PRTREG:	.PRINT  #REGMSG
+	CALL    PRTINF
+	RETURN
+;
+;------------------------------------------------------------------
+; Pause
+PAUSE:	.PRINT  #PAUHDR
+	BIS     #TTSPC$, @#JSW
+1$:	.TTYINR
+	BCS     1$
+	CMPB    R0, #40
+	BNE     1$
+	BIC     #TTSPC$, @#JSW
+	.PRINT  #PAUMSG
+	RETURN
+	.SBTTL  Executation table
+;
+ADREXE:	.WORD   RESET
+	.WORD   WRTDAT
+	.WORD   RDRDAT
+	.WORD   CNGWAR
+	.WORD   CNGRAR
+	.WORD   PRTREG
+	.WORD   CHNBYT
+	.WORD   CNGVAL
+	.WORD   INTMOD
+	.SBTTL  Data section
+	.PSECT  $DATA, D, RW
+;
+FLAGS::	.WORD   0
+;
+COUNT:	.WORD   5	; Number of bytes
+WRTVAL:	.WORD   1	; Initial value
+BUFF:	.BLKB   82.	; Character buffer
+	.EVEN
+	.SBTTL  Text section
+	.PSECT  $TEXT, D, RO
+;
+PROMPT:	.ASCII  <15><12><12>
+	.ASCII  |---------------------|<12><15>
+	.ASCII  ! Reset	   - 0!<12><15>
+	.ASCII  ! Write data      - 1!<12><15>
+	.ASCII  ! Read  data      - 2!<12><15>
+	.ASCII  ! Init write-reg  - 3!<12><15>
+	.ASCII  ! Init read-reg   - 4!<12><15>
+	.ASCII  ! Print regs/info - 5!<12><15>
+	.ASCII  ! Number of bytes - 6!<12><15>
+;       .ASCII  ! EEPROM address  - 7!<12><15>
+	.ASCII  ! Value to write  - 7!<12><15>
+	.ASCII  ! Set/reset int.  - 8!<12><15>
+	.ASCII  !---------------------!<12><15>
+	.ASCII  /Choice:	/<200>
+RESMSG:	.ASCIZ  <12><15>/ *** Reset ***/
+WRTMSG:	.ASCIZ  <12><15>/ *** Fill output buffer ***/
+RDRMSG:	.ASCIZ  <12><15>/ *** Read from input buffer ****/
+WOPMSG:	.ASCIZ  <12><15>/ *** Write operation ***/
+ROPMSG:	.ASCIZ  <12><15>/ *** Read operation ***/
+REGMSG:	.ASCIZ  <12><15>| *** Registers/info ***|
+WACMSG:	.ASCIZ  <12><15>/ *** Change write-address-register ***/
+RACMSG:	.ASCIZ  <12><15>/ *** Change read-address-register ***/
+CSRHDR:	.ASCII  / CSR = /<200>
+ERRHDR:	.ASCII  <12><15>/ ERRORS = /<200>
+IWRHDR:	.ASCII  /   WR-REGS = /<200>
+IRDHDR:	.ASCII  /   RD-REGS = /<200>
+NBHDR:	.ASCII  <12><15>/ NBytes = /<200>
+VALHDR:	.ASCII  /   Value = /<200>
+IEBHDR:	.ASCII  /   IE = /<200>
+WAIHDR:	.ASCII  / Write address register = /<200>
+RAIHDR:	.ASCII  / Read address register = /<200>
+IRXHDR:	.ASCII  / RXDONE = /<200>
+ITXHDR:	.ASCII  /   TXDONE = /<200>
+IERHDR:	.ASCII  /   ERRFLG = /<200>
+PAUHDR:	.ASCII  <12><15>/ Press SPACE/<200>
+PAUMSG:	.ASCII  <15>/	    /<15><200>
+BYTMSG:	.ASCII  <12><15>/ Enter new byte number :/<200>
+WAIMSG:	.ASCII  <12><15>/ Enter new write address :/<200>
+RAIMSG:	.ASCII  <12><15>/ Enter new read address :/<200>
+VALMSG:	.ASCII  <12><15>/ Enter new value:	/<200>
+IDMSG:	.ASCIZ  <12><15>/ Interrupt disabled/
+IEMSG:	.ASCIZ  <12><15>/ Interrupt enabled/
+EOL:	.ASCIZ  <12><15>
+	.EVEN
+	.END START

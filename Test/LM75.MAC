@@ -1,0 +1,342 @@
+	.TITLE	LM75 -- LM75 I2C module test
+	.IDENT	/X1.00/
+.REM %
+Test functions of the LM75 module.
+
+To link use command: LINK LM75,PRTVAL,INP
+To exit just press <Enter> when promted (Choice)
+%
+	.MCALL	.PRINT, .EXIT, .TTYOUT, .TTYIN
+	.INCLUDE /LM75.INC/
+;
+;JSW	= 44			; Job status word
+;TTSPC$	= 10000			; Special terminal mode
+;
+	.PSECT
+;
+START::
+1$:	CALL    PRTCSR
+	.PRINT  #PROMPT		; Print info header
+	MOV	#BUFF, R1
+2$:	.TTYIN	; Get a character from keyboard
+	CMPB	R0, #12		; Is the character LF
+	BEQ	3$		; Yes - break
+	MOVB	R0, (R1)+	; No - put the character to buffer
+	BR	 2$		; Loop
+3$:	TSTB	BUFF		; Nothing entered?
+	BEQ	20$		; Branch if nothing entered
+	MOVB	BUFF, R1	; Get first byte
+	SUB	#60, R1		; Convert to digit
+	CMPB	R1, #8.		; More than limit?
+	BHI	20$		; Yes - exit
+	ASL	R1		; Mult by 2
+	CALL	@ADREXE(R1)	; Jump to execution
+	BR	 1$		; Go back for more
+20$:	.EXIT			; Exit program on null input
+
+	.SBTTL	Operations section
+	.SBTTL	Reset operation
+;------------------------------------------------------------------
+; Reset operation
+;
+RESET::
+	.PRINT	#RESOH
+	MOV	#M.RST, @#CSR	; Call reset function
+1$:	BITB	#RDYB, @#CSR	; Wait for ready ...
+	BEQ	1$		; ... bit
+;	CALL	PRTCSR		; Print CSR value
+	RETURN
+
+	.SBTTL	Read operations
+;------------------------------------------------------------------
+; Read Temp register
+;
+RTEMP::
+	.PRINT	#RTMPOH
+	MOV	@#CSR, R0	; Get CSR value
+	BIC	#14007, R0	; Clear reg.num and operation bits
+	BIS	#M.RDR, R0	; Set correct bits and ...
+	JMP	RCONT		; ... jump to continu
+;
+;------------------------------------------------------------------
+; Read Conf register
+;
+RCONF::
+	.PRINT	#RCFNOH
+	MOV	@#CSR, R0	; Get CSR value
+	BIC	#14007, R0	; Clear address and operation bits
+	BIS	#CR!M.RDR, R0	; Set correct bits and ...
+	JMP	RCONT		; ... jump to continue
+;
+;------------------------------------------------------------------
+; Read Thyst register
+;
+RTHYS::
+	.PRINT	#RTHYOH
+	MOV	@#CSR, R0	; Get CSR value
+	BIC	#14007, R0	; Clear address and operation bits
+	BIS	#HR!M.RDR, R0	; Set correct bits and ...
+	JMP	RCONT		; ... jump to continu
+;
+;------------------------------------------------------------------
+; Read TOS register
+;
+RTOS::
+	.PRINT	#RTOSOH
+	MOV	@#CSR, R0	; Get CSR value
+	BIC	#14007, R0	; Clear address and operation bits
+	BIS	#OR!M.RDR, R0	; Set correct bits
+;
+;------------------------------------------------------------------
+; Continuation part for read operations
+;
+RCONT:  MOV	R0, @#CSR	; Start the operation
+	BIT	#IEF, FLAGS	; Interrupt mode?
+	BEQ	1$		; No - poll CSR
+	CALL	WRINT		; Yes - wait for interrupt flag
+	BR	 2$
+1$:	CALL	WRDY		; Poll the CSR to detect completion
+;
+; Reset RIB to 0 by writing 1 to it
+	MOV	@#CSR, R0	; Get CSR value
+	BIC	#ERRB!TIB, R0	; Protect TIB and ERRB
+	MOV	R0, @#CSR	; Reset RIB
+;
+2$:	BIT	#ERF, FLAGS	; Error?
+	BEQ	3$		; No - continue
+	RETURN			; Yes - return
+3$:
+	TST	-(R1)		; Minus 2 from R1
+	MOV	PRTTBL(R1), R0
+	.PRINT
+	MOV	@#DATA, R0	; Read data from module
+	TST	R1		; Temp reg. processing?
+	BGT	4$		; No - jump to continue
+	CLRB	R0		; Yes - clear low byte ...
+	SWAB	R0		; ... and swab
+	CALL	PRTDEU
+	BR	5$
+4$:	CALL	PRTOCT		; Print data value
+5$:	.PRINT	#EOL
+	.PRINT	#EOL
+	RETURN
+
+	.SBTTL	Write operations
+;------------------------------------------------------------------
+; Write Conf register
+WCONF:: MOV	@#CSR, R2	; Get CSR value
+	BIC	#14007, R2	; Clear address and operation bits
+	BIS	#CR!M.WRT, R2	; Set correct bit ...
+	JMP	WCONT		; ... and jump to continue
+;
+;------------------------------------------------------------------
+; Write Thyst register
+WTHYS:: MOV	@#CSR, R2	; Get CSR value
+	BIC	#14007, R2	; Clear address and operation bits
+	BIS	#HR!M.WRT, R2	; Set correct bit ...
+	JMP	WCONT	; ... and jump to continu
+;
+;------------------------------------------------------------------
+; Write TOS register
+WTOS::  MOV	@#CSR, R2	; Get CSR value
+	BIC	#14007, R2	; Clear address and operation bits
+	BIS	#OR!M.WRT, R2	; Set correct bit
+;
+;------------------------------------------------------------------
+; Continuation part for write operations
+;
+WCONT:  TST	-(R1)
+	MOV	PRTTBL(R1), R0
+	.PRINT
+	.PRINT	#VALMSG
+	CALL	INOCT
+	CMP	R1, #10		; Conf reg. processing?
+	BNE	1$		; No - continue
+	BIC	#177400, R0	; Yes - clear high byte
+1$:	MOV	R0, @#DATA	; Store data and ...
+	MOV	R2, @#CSR	; ... start the operation
+;
+	BIT	#IEF, FLAGS	; Interrupt mode?
+	BEQ	2$		; No - poll CSR
+	CALL	WTINT		; Yes - wait for interrupt flag
+	BR	 3$
+2$:	CALL	WRDY		; Poll the CSR to detect completion
+;
+; Reset TIB to 0 by writing 1 to it
+	MOV	@#CSR, R1	; Get CSR value
+	BIC	#ERRB!RIB, R1	; Protect RIB and ERRB
+	MOV	R1, @#CSR	; Reset TIB
+;
+3$:	.PRINT  #EOL
+	RETURN
+
+	.SBTTL	Interrupt section
+;------------------------------------------------------------------
+; Set/reset interrupt mode
+;
+INTMOD::
+	BIT	#IEB, @#CSR	; Test IE bit in CSR
+	BEQ	1$		; If '0' - jump to set, else ...
+	BIC	#IEB, @#CSR	; ... reset the bit, ...
+	MOV	#IDMSG, R0	; ... info line address to R0 ...
+	BR	 2$		; ... and jump to print
+1$:	CALL	SETINT		; Set interrupt mode, ...
+	MOV	#IEMSG, R0	; ...  info line address to R0
+2$:	.PRINT			; Print info
+;	CALL	PRTCSR		; Print CSR value
+	RETURN
+;------------------------------------------------------------------
+; Interrupt processing routine
+;
+MODINT::
+	BIC	#ERF, FLAGS	; Clear error flag
+	MOV	@#CSR, R0	; Get CSR value
+	BIT	#ERRB, R0	; Check error state
+	BEQ	I.CONT		; No - continue
+	BIS	#ERF, FLAGS
+I.CONT:	BIT	#RIB, R0	; If RIB is not set to '1' then
+	BEQ	I.TX		; process TX-interrupt
+; Process receive interrupt
+	BIC	#ERRB!TIB, R0	; Protect TIB and ERRB
+	MOV	R0, @#CSR	; Reset RIB to '0' by witting ...
+				; ... '1' to it
+	BIS	#RXF, FLAGS	; Set receive flag
+	BR	 I.FIN
+; Process transmit interrupt
+I.TX:	BIT	#TIB, R0	; If TIB is not set to '1' ...
+	BEQ	I.FIN		; ... then return
+	BIC	#ERRB!RIB, R0	; Protect RIB and ERRB
+	MOV	R0, @#CSR	; Reset TIB to '0' by witting ...
+				; ... '1' to it
+	BIS	#TXF, FLAGS	; Set transmit flag
+I.FIN:	RTI			; Return to caller
+;
+;------------------------------------------------------------------
+; Set interrupt mode
+;
+SETINT::
+	MOV	#MODINT, MODVEC	; Set address of interrupt handler ...
+	MOV	#PRI07, MODVEC+2 ; ... and new IPL
+	BIC	#TXF!RXF, FLAGS	; Clear RX/TX flags
+	BIS	#IEB, @#CSR	; Enable interrupt
+	RTS	PC
+
+	.SBTTL	Wait section
+;------------------------------------------------------------------
+; Wair for ready bit (needs timeout part)
+;
+WRDY::
+	BIC	#ERF, FLAGS	; Clear error flag
+1$:	MOV	@#CSR, R0	; Get CSR value
+	BIT	#ERRB, R0	; Check error
+	BNE	2$		; If yes - exit
+	BITB	#RDYB, R0	; Wait for ready ...
+	BEQ	1$		; ... bit
+	RETURN
+2$:	BIS	#ERF, FLAGS	; Set error flag
+	RETURN
+;
+;------------------------------------------------------------------
+; Wait for receive interupt flag (needs timeout part)
+;
+WRINT::
+1$:	BIT	#RXF, FLAGS
+	BEQ	1$
+	BIC	#RXF, FLAGS
+	RETURN
+;
+;------------------------------------------------------------------
+; Wait for transmit interupt flag (needs timeout part)
+;
+WTINT::
+1$:	BIT	#TXF, FLAGS
+	BEQ	1$
+	BIC	#TXF, FLAGS
+	RETURN
+;
+;------------------------------------------------------------------
+; Print CSR value
+;
+PRTCSR::
+	MOV	R1, -(SP)
+	.PRINT  #CSRMSG
+	MOV	@#CSR, R1	; Get CSR value
+	MOV	R1, R0
+	CALL	PRTOCT		; Print it
+	BIT	#IEB, R1	; Test IE bit
+	BEQ	1$		; IE = '0' - jump to info section
+	BIS	#IEF, FLAGS	; IE = '1' - set flag, ...
+	MOV	#'1, R1		; ... put '1' to R1 ...
+	BR	 2$		; ... and jump to print
+1$:	BIC	#IEF, FLAGS	; IE = '0' - clear flag and ...
+	MOV	#'0, R1		; ... put '0' to R1
+2$:	.PRINT  #IEBMSG
+	MOV	R1, R0		; R1 -> R0 ...
+	.TTYOUT			; ... and output
+	MOV	(SP)+, R1
+	RETURN
+
+	.SBTTL	Executation and printing tables
+;
+ADREXE: .WORD	RESET
+	.WORD	RTEMP
+	.WORD	RCONF
+	.WORD	RTHYS
+	.WORD	RTOS
+	.WORD	WCONF
+	.WORD	WTHYS
+	.WORD	WTOS
+	.WORD	INTMOD
+;
+PRTTBL: .WORD	TMPRV
+	.WORD	CFNRV
+	.WORD	THYRV
+	.WORD	TOSRV
+	.WORD	WCFNOH
+	.WORD	WTHYOH
+	.WORD	WTOSOH
+
+	.SBTTL	Data section
+	.PSECT	$DATA, D, RW
+;
+FLAGS::	.WORD	0
+;
+BUFF:	.BLKB	82.		; Character buffer
+
+	.SBTTL	Text section
+	.PSECT	$TEXT, D, RO
+;
+PROMPT: .ASCII	<15><12>
+	.ASCII	|------------------------|<12><15>
+	.ASCII	! Reset               - 0!<12><15>
+	.ASCII	! Read Temp. reg.     - 1!<12><15>
+	.ASCII	! Read Conf reg.      - 2!<12><15>
+	.ASCII	! Read Thyst reg.     - 3!<12><15>
+	.ASCII	! Read TOS reg.       - 4!<12><15>
+	.ASCII	! Write to Conf reg.  - 5!<12><15>
+	.ASCII	! Write to Thyst reg. - 6!<12><15>
+	.ASCII	! Write to TOS reg.   - 7!<12><15>
+	.ASCII	! Set/reset int.      - 8!<12><15>
+	.ASCII	!------------------------!<12><15>
+	.ASCII	/Choice: /<200>
+RESOH:	.ASCIZ	<12><15>/ *** Reset ***/
+RTMPOH:	.ASCIZ	<12><15>/ *** Read Temp register  ***/
+RCFNOH:	.ASCIZ	<12><15>/ *** Read Conf register  ***/
+RTHYOH:	.ASCIZ	<12><15>/ *** Read Thyst register  ***/
+RTOSOH:	.ASCIZ	<12><15>/ *** Read TOS register  ***/
+WCFNOH:	.ASCIZ	<12><15>/ *** Write Conf register  ***/
+WTHYOH:	.ASCIZ	<12><15>/ *** Write Thyst register  ***/
+WTOSOH:	.ASCIZ	<12><15>/ *** Write TOS register  ***/
+;
+TMPRV:	.ASCII	/ Temp = /<200>
+CFNRV:	.ASCII	/ Conf = /<200>
+THYRV:	.ASCII	/ Hyst = /<200>
+TOSRV:	.ASCII	/ TOS  = /<200>
+IDMSG:	.ASCIZ	<12><15>/ Interrupt disabled/
+IEMSG:	.ASCIZ	<12><15>/ Interrupt enabled/
+VALMSG:	.ASCII	/ Enter value (oct) :/<200>
+CSRMSG:	.ASCII	/ CSR = /<200>
+IEBMSG:	.ASCII	/   IE = /<200>
+EOL:	.BYTE	0
+	.EVEN
+	.END START
