@@ -1,5 +1,5 @@
 # I2C-modules
-Модули для FPGA-версии PDP-11 серии от forth32
+Модули для FPGA-версии PDP-11 от forth32
 eeprom.v       - AT24C EEPROM
 lm75.v	       - температурный датчик LM75A
 bus_init.v     - обеспечение прерывания
